@@ -9,7 +9,7 @@ use std::cmp::{max, min};
 use std::panic::resume_unwind;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use std::{thread, vec};
+use std::{slice, thread, vec};
 
 use itertools::Itertools;
 use jiff::Timestamp;
@@ -177,15 +177,10 @@ impl Lab<'_> {
     ///
     /// If it succeeds, return the timeouts to be used for the other scenarios.
     fn run_baseline(&self, build_dir: &BuildDir, mutants: &[Mutant]) -> Result<ScenarioOutcome> {
-        let all_mutated_packages: Vec<Arc<Package>> = mutants
-            .iter()
-            .map(|m| Arc::clone(&m.source_file.package))
-            .sorted_by_key(|p| p.name.clone())
-            .unique()
-            .collect_vec();
+        let test_packages = self.tests_for_mutant.package_selection(mutants);
         self.make_worker(build_dir).run_one_scenario(
             &Scenario::Baseline,
-            &PackageSelection::Explicit(all_mutated_packages),
+            &test_packages,
             Timeouts::for_baseline(self.options),
         )
     }
@@ -242,13 +237,9 @@ impl Worker<'_> {
                 return Ok(());
             };
             let _span = debug_span!("mutant", name = mutant.name(false)).entered();
-            let test_packages = match self.tests_for_mutant {
-                TestsForMutant::Workspace => PackageSelection::All,
-                TestsForMutant::Mutated => {
-                    PackageSelection::Explicit(vec![mutant.source_file.package.clone()])
-                }
-                TestsForMutant::Explicit(packages) => PackageSelection::Explicit(packages.clone()),
-            };
+            let test_packages = self
+                .tests_for_mutant
+                .package_selection(slice::from_ref(&mutant));
             self.run_one_scenario(&Scenario::Mutant(mutant), &test_packages, timeouts)?;
         }
     }
@@ -331,7 +322,7 @@ impl Worker<'_> {
 pub enum TestsForMutant {
     /// Test all packages in the workspace
     Workspace,
-    /// Test only the package that was mutated
+    /// Test only the mutated packages
     Mutated,
     /// Test specific packages
     Explicit(Vec<Arc<Package>>),
@@ -345,6 +336,22 @@ impl TestsForMutant {
             TestPackages::Named(ref package_names) => {
                 TestsForMutant::Explicit(workspace.packages_by_name(package_names))
             }
+        }
+    }
+
+    /// Packages whose tests run against `mutants`.
+    fn package_selection(&self, mutants: &[Mutant]) -> PackageSelection {
+        match self {
+            TestsForMutant::Workspace => PackageSelection::All,
+            TestsForMutant::Mutated => PackageSelection::Explicit(
+                mutants
+                    .iter()
+                    .map(|m| Arc::clone(&m.source_file.package))
+                    .sorted_by_key(|p| p.name.clone())
+                    .unique()
+                    .collect_vec(),
+            ),
+            TestsForMutant::Explicit(packages) => PackageSelection::Explicit(packages.clone()),
         }
     }
 }

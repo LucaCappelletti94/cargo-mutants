@@ -10,6 +10,8 @@
 
 - Fixed: Support for Illumos, by updating to `fs4`.
 
+- Fixed: `--test-package` and `--test-workspace` also apply to the baseline tests.
+
 ## 27.1.0
 
 Released 2026-06-02.

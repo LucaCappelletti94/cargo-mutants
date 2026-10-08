@@ -3096,6 +3096,47 @@ fn cross_package_tests() {
         .code(0);
 }
 
+/// Run with `-- --test lib`, a target only the `tests` package has, and check every logged
+/// `cargo test` command.
+fn check_cross_package_tests_test_args(selection_arg: &str, expected_test_args: &str) {
+    let tmp = copy_of_testdata("cross_package_tests");
+    let path = tmp.path();
+    run()
+        .args(["mutants", "--shard=0/4", selection_arg, "-d"])
+        .arg(path.join("lib"))
+        .args(["--", "--test", "lib"])
+        .assert()
+        .success();
+    let log_paths = read_dir(path.join("mutants.out/log"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect_vec();
+    assert_eq!(log_paths.len(), 2, "baseline and one mutant");
+    for log_path in log_paths {
+        let log = read_to_string(&log_path).unwrap();
+        let command = log
+            .lines()
+            .filter(|line| line.starts_with("*** "))
+            .find_map(|line| line.split_once(" test --verbose "))
+            .unwrap_or_else(|| panic!("no cargo test command in {}", log_path.display()))
+            .1;
+        assert_eq!(command, expected_test_args, "{}", log_path.display());
+    }
+}
+
+#[test]
+fn baseline_applies_test_package_argument() {
+    check_cross_package_tests_test_args(
+        "--test-package=cargo-mutants-testdata-cross-package-tests-tests",
+        "--package=cargo-mutants-testdata-cross-package-tests-tests@0.1.0 --test lib",
+    );
+}
+
+#[test]
+fn baseline_applies_test_workspace_argument() {
+    check_cross_package_tests_test_args("--test-workspace=true", "--workspace --test lib");
+}
+
 #[test]
 fn list_diff_json_contains_diffs() {
     let tmp = copy_of_testdata("factorial");
